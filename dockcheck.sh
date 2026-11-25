@@ -216,7 +216,11 @@ if [[ "$TagBump" == true ]]; then
     exit 2
   fi
   source "${ScriptWorkDir}/addons/tagbump/tagbump.sh" || { printf "Could not source the tagbump addon.\n"; exit 2; }
-  TagBumpDir=$(mktemp -d) || exit 1
+  # /tmp may be unwritable (hardened hosts, read-only fs) - fall back to the cache dir
+  TagBumpDir=$(mktemp -d 2>/dev/null) || {
+    mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/dockcheck" 2>/dev/null &&
+    TagBumpDir=$(mktemp -d "${XDG_CACHE_HOME:-$HOME/.cache}/dockcheck/tagbump.XXXXXX" 2>/dev/null)
+  } || { printf "Could not create a temporary directory (tried TMPDIR/tmp and ~/.cache/dockcheck).\n"; exit 1; }
   trap 'rm -rf "$TagBumpDir"' EXIT
 fi
 if [[ -n "$CollectorTextFileDirectory" ]]; then
