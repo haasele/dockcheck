@@ -7,6 +7,9 @@
 # Requires: regctl (already a dockcheck dependency), sort -V, jq, and read access to the
 # compose files (when dockcheck runs containerized, mount them at the same path).
 
+# Debug output (stderr) when TagBumpDebug=true, to see why a container got no bump.
+tagbump_dbg() { [[ "${TagBumpDebug:-false}" == true ]] && printf 'tagbump[%s]: %s\n' "$1" "$2" >&2; return 0; }
+
 # Split a tag into prefix|version|suffix. Returns 1 when the tag contains no number.
 tagbump_split() {
   local re='^([^0-9]*)([0-9]+([._-][0-9]+)*)(.*)$'
@@ -75,23 +78,29 @@ tagbump_compose_files() {
 # exists AND the old "image: repo:tag" literal was found in a readable compose file.
 tagbump_check() {
   local name="$1" image="$2" labels="$3" repo cur lock new files f hits=()
-  [[ "$image" == *@sha256:* ]] && return 1
+  [[ "$image" == *@sha256:* ]] && { tagbump_dbg "$name" "pinned by digest, skipped"; return 1; }
   cur="${image##*:}"
-  [[ "$image" != *:* || "$cur" == */* ]] && return 1     # no tag given
-  [[ "$cur" == "latest" ]] && return 1                   # rolling tag - digest check handles it
+  [[ "$image" != *:* || "$cur" == */* ]] && { tagbump_dbg "$name" "no tag in image ref, skipped"; return 1; }
+  [[ "$cur" == "latest" ]] && { tagbump_dbg "$name" "tag is latest, digest check only"; return 1; }
   repo="${image%:*}"
-  tagbump_split "$cur" > /dev/null || return 1           # not a versioned tag
+  tagbump_split "$cur" > /dev/null || { tagbump_dbg "$name" "tag '$cur' has no version number, skipped"; return 1; }
 
   lock=$("$jqbin" -r '."mag37.dockcheck.tag-lock" // empty' <<< "$labels")
   [[ "$lock" =~ ^[0-9]+$ ]] || lock="${TagBumpLock:-0}"
 
-  new=$($t_out "$regbin" -v error tag ls "$repo" 2>/dev/null | tagbump_next_tag "$cur" "$lock") || return 1
+  local taglist
+  taglist=$($t_out "$regbin" -v error tag ls "$repo" 2>&1) || { tagbump_dbg "$name" "regctl tag ls $repo failed: ${taglist:0:200}"; return 1; }
+  new=$(tagbump_next_tag "$cur" "$lock" <<< "$taglist") || {
+    tagbump_dbg "$name" "$repo:$cur is already the newest matching tag (lock=$lock, $(wc -l <<< "$taglist") tags listed)"
+    return 1; }
 
-  files=$(tagbump_compose_files "$labels") || return 1
+  files=$(tagbump_compose_files "$labels") || { tagbump_dbg "$name" "no compose files in container labels"; return 1; }
   while IFS= read -r f; do
     [[ -r "$f" ]] && grep -Eq "image:[[:space:]]*[\"']?$(tagbump_esc "$repo"):$(tagbump_esc "$cur")([\"'[:space:]]|\$)" "$f" && hits+=("$f")
   done <<< "$files"
-  [[ ${#hits[@]} -gt 0 ]] || return 1                    # literal not found (variables / not mounted) - leave alone
+  [[ ${#hits[@]} -gt 0 ]] || {                           # literal not found (variables / not mounted) - leave alone
+    tagbump_dbg "$name" "newer tag $new exists, but 'image: $repo:$cur' not found in: $(echo $files) (variable or file not readable?)"
+    return 1; }
 
   printf '%s|%s|%s|%s\n' "$repo" "$cur" "$new" "$(IFS=,; echo "${hits[*]}")" > "$TagBumpDir/$name"
   return 0

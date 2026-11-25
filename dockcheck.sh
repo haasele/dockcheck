@@ -133,6 +133,7 @@ SpecificContainer=${SpecificContainer:-""}
 SkipRecreate=${SkipRecreate:-false}
 TagBump=${TagBump:-false}
 TagBumpLock=${TagBumpLock:-0}
+TagBumpDebug=${TagBumpDebug:-false}
 Excludes=()
 ExcludeUpdates=()
 GotUpdates=()
@@ -598,8 +599,8 @@ export -f check_image datecheck platform_current
 export Excludes_string="${Excludes[*]:-}" # Can only export scalar variables
 export t_out regbin RepoUrl DaysOld DRunUp jqbin OnlyLabel RunTimestamp RunEpoch TestNotify
 if [[ "$TagBump" == true ]]; then
-  export -f tagbump_check tagbump_split tagbump_esc tagbump_next_tag tagbump_compose_files
-  export TagBump TagBumpLock TagBumpDir
+  export -f tagbump_check tagbump_dbg tagbump_split tagbump_esc tagbump_next_tag tagbump_compose_files
+  export TagBump TagBumpLock TagBumpDir TagBumpDebug
 fi
 
 # Check for POSIX xargs with -P option, fallback without async
@@ -660,9 +661,17 @@ if [[ -n ${GotUpdates[*]:-} ]]; then
   printf "\n%bContainers with updates available:%b\n" "$c_yellow" "$c_reset"
   if [[ -s "$ScriptWorkDir/urls.list" ]] && [[ "$PrintReleaseURL" == true ]]; then releasenotes; else Updates=("${GotUpdates[@]}"); fi
   [[ "$AutoMode" == false ]] && list_options || printf "%s\n" "${Updates[@]}"
-  if [[ "$TagBump" == true ]] && [[ -n "$(ls -A "$TagBumpDir" 2>/dev/null)" ]]; then
-    printf "\n%bNewer versioned tags (compose file will be rewritten on update):%b\n" "$c_blue" "$c_reset"
-    tagbump_list
+  if [[ "$TagBump" == true ]]; then
+    if [[ -n "$(ls -A "$TagBumpDir" 2>/dev/null)" ]]; then
+      printf "\n%bNewer versioned tag found (compose file will be rewritten on update):%b\n" "$c_blue" "$c_reset"
+      tagbump_list
+    fi
+    SameTagUpdates=()
+    for u in "${GotUpdates[@]}"; do [[ -s "$TagBumpDir/$u" ]] || SameTagUpdates+=("$u"); done
+    if [[ -n "${SameTagUpdates[*]:-}" ]]; then
+      printf "\n%bSame tag, new image digest (no tag change):%b\n" "$c_blue" "$c_reset"
+      printf "%s\n" "${SameTagUpdates[@]}"
+    fi
   fi
   [[ "$Notify" == true ]] && { exec_if_exists_or_fail send_notification "${GotUpdates[@]}" || printf "\nCould not source notification function.\n"; }
 else
