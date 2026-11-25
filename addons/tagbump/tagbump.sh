@@ -96,10 +96,16 @@ tagbump_check() {
 
   files=$(tagbump_compose_files "$labels") || { tagbump_dbg "$name" "no compose files in container labels"; return 1; }
   while IFS= read -r f; do
-    [[ -r "$f" ]] && grep -Eq "image:[[:space:]]*[\"']?$(tagbump_esc "$repo"):$(tagbump_esc "$cur")([\"'[:space:]]|\$)" "$f" && hits+=("$f")
+    if [[ ! -r "$f" ]]; then
+      tagbump_dbg "$name" "compose file not readable by $(id -un): $f"
+    elif grep -Eq "image:[[:space:]]*[\"']?$(tagbump_esc "$repo"):$(tagbump_esc "$cur")([\"'[:space:]]|\$)" "$f"; then
+      hits+=("$f")
+    else
+      tagbump_dbg "$name" "no literal 'image: $repo:$cur' line in $f; image lines found: $(grep -E '^[[:space:]]*image:' "$f" | tr -s ' ' | tr '\n' ';')"
+    fi
   done <<< "$files"
   [[ ${#hits[@]} -gt 0 ]] || {                           # literal not found (variables / not mounted) - leave alone
-    tagbump_dbg "$name" "newer tag $new exists, but 'image: $repo:$cur' not found in: $(echo $files) (variable or file not readable?)"
+    tagbump_dbg "$name" "newer tag $new exists, but 'image: $repo:$cur' not found in: $(echo $files) (see lines above)"
     return 1; }
 
   printf '%s|%s|%s|%s\n' "$repo" "$cur" "$new" "$(IFS=,; echo "${hits[*]}")" > "$TagBumpDir/$name"
@@ -147,4 +153,17 @@ tagbump_list() {
     name=${f##*/}; IFS='|' read -r repo old new _ < "$f"
     printf '%s: %s -> %s\n' "$name" "$old" "$new"
   done
+}
+
+# tagbump_digest_info <container> - for same-tag updates: build date + digest, local vs. registry
+tagbump_digest_info() {
+  local name="$1" image imgid ldate rdate ldig rdig
+  image=$(docker inspect "$name" --format '{{.Config.Image}}' 2>/dev/null) || return 0
+  imgid=$(docker inspect "$name" --format '{{.Image}}' 2>/dev/null)
+  ldate=$(docker image inspect "$imgid" --format '{{.Created}}' 2>/dev/null | cut -c1-16)
+  rdate=$($t_out "$regbin" -v error image inspect "$image" --format '{{.Created}}' 2>/dev/null | cut -c1-16)
+  ldig=$(docker image inspect "$imgid" --format '{{.RepoDigests}}' 2>/dev/null | grep -o 'sha256:[0-9a-f]*' | head -1 | cut -c8-19)
+  rdig=$($t_out "$regbin" -v error image digest "$image" 2>/dev/null | cut -c8-19)
+  printf '%s: %s\n  running:  built %s, digest %s\n  registry: built %s, digest %s\n' \
+    "$name" "$image" "${ldate:-?}" "${ldig:-?}" "${rdate:-?}" "${rdig:-?}"
 }

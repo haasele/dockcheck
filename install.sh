@@ -7,9 +7,13 @@
 # Installs dockcheck.sh + addons + notify templates to INSTALL_DIR and symlinks
 # dockcheck.sh into BIN_DIR. An existing dockcheck.config / notify.sh is never touched.
 #
+# Defaults depend on who runs it:
+#   as root / via sudo  -> system-wide: /opt/dockcheck  + symlink in /usr/local/bin  (available to everyone)
+#   as normal user      -> per user:    ~/.local/share/dockcheck + symlink in ~/.local/bin
+#
 # Overrides (environment):
-#   INSTALL_DIR   default: ~/.local/share/dockcheck
-#   BIN_DIR       default: ~/.local/bin   (macOS: /usr/local/bin is also fine)
+#   INSTALL_DIR   override the install directory
+#   BIN_DIR       override the symlink directory
 #   REPO          default: haasele/dockcheck
 #   BRANCH        default: main
 
@@ -17,8 +21,15 @@ set -euo pipefail
 
 REPO="${REPO:-haasele/dockcheck}"
 BRANCH="${BRANCH:-main}"
-INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/share/dockcheck}"
-BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
+if [[ "$(id -u)" -eq 0 ]]; then
+  SCOPE="system-wide"
+  INSTALL_DIR="${INSTALL_DIR:-/opt/dockcheck}"
+  BIN_DIR="${BIN_DIR:-/usr/local/bin}"
+else
+  SCOPE="current user only"
+  INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/share/dockcheck}"
+  BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
+fi
 TARBALL_URL="${DOCKCHECK_TARBALL:-https://github.com/${REPO}/archive/refs/heads/${BRANCH}.tar.gz}"
 
 say()  { printf '\033[0;36m==>\033[0m %s\n' "$*"; }
@@ -59,7 +70,8 @@ fi
 [[ -f "$SRC/addons/tagbump/tagbump.sh" ]]  || die "addons/tagbump/tagbump.sh not found in source."
 
 # --- 2. install -----------------------------------------------------------------------------
-mkdir -p "$INSTALL_DIR" "$BIN_DIR"
+say "Install scope: $SCOPE"
+mkdir -p "$INSTALL_DIR" "$BIN_DIR" || die "Cannot create $INSTALL_DIR / $BIN_DIR - for a system-wide install run with sudo."
 
 install -m 0755 "$SRC/dockcheck.sh" "$INSTALL_DIR/dockcheck.sh"
 
@@ -84,8 +96,13 @@ case ":$PATH:" in
   *) warn "$BIN_DIR is not in your PATH. Add it, e.g.: echo 'export PATH=\"$BIN_DIR:\$PATH\"' >> ~/.profile" ;;
 esac
 
-if [[ ! -f "$INSTALL_DIR/dockcheck.config" && ! -f "$HOME/.config/dockcheck/dockcheck.config" ]]; then
-  say "Optional: cp $INSTALL_DIR/default.config ~/.config/dockcheck/dockcheck.config   (then edit)"
+if [[ ! -f "$INSTALL_DIR/dockcheck.config" ]]; then
+  say "Optional: cp $INSTALL_DIR/default.config $INSTALL_DIR/dockcheck.config   (then edit)"
+fi
+if [[ "$(id -u)" -eq 0 ]]; then
+  say "Note: docker login and 'regctl registry set' settings are per user - set them as root too."
+else
+  say "For a system-wide install (usable with sudo/cron as root): re-run with sudo."
 fi
 
 cat <<MSG

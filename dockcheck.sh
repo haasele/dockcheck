@@ -670,7 +670,7 @@ if [[ -n ${GotUpdates[*]:-} ]]; then
     for u in "${GotUpdates[@]}"; do [[ -s "$TagBumpDir/$u" ]] || SameTagUpdates+=("$u"); done
     if [[ -n "${SameTagUpdates[*]:-}" ]]; then
       printf "\n%bSame tag, new image digest (no tag change):%b\n" "$c_blue" "$c_reset"
-      printf "%s\n" "${SameTagUpdates[@]}"
+      for u in "${SameTagUpdates[@]}"; do tagbump_digest_info "$u"; done
     fi
   fi
   [[ "$Notify" == true ]] && { exec_if_exists_or_fail send_notification "${GotUpdates[@]}" || printf "\nCould not source notification function.\n"; }
