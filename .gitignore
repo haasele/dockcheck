@@ -1,0 +1,16 @@
+# ignore users custom notify.sh
+/notify*.sh
+/urls.list
+# ignore user config
+/dockcheck.config
+# ignore the auto-installed regctl
+regctl
+# ignore snooze file
+snooze.list
+# ignore updates file
+updates_available.txt
+# ignore user compose files
+compose.yaml
+compose.yml
+docker-compose.yaml
+docker-compose.yml
